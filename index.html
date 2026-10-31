@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIデータセンター建設コスト試算</title>
+<meta name="description" content="AIデータセンターの規模（MW）・立地・NVIDIA GPUを選ぶと、建設費・GPU費・電気代・必要GPU台数・推論で何人に届くかを試算できる無料シミュレーター。日本の事例つき。">
+<meta property="og:type" content="website">
+<meta property="og:title" content="AIデータセンター建設コスト試算">
+<meta property="og:description" content="規模・立地・GPUを選ぶだけで、AIデータセンターの総額とできることの目安がわかる無料シミュレーター。">
+<meta property="og:locale" content="ja_JP">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231f5fa8'/%3E%3Crect x='7' y='17' width='4' height='8' fill='%23fff'/%3E%3Crect x='14' y='12' width='4' height='13' fill='%23fff'/%3E%3Crect x='21' y='7' width='4' height='18' fill='%23f0b44c'/%3E%3C/svg%3E">
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+JP:wght@400;500;700&family=Zen+Kaku+Gothic+New:wght@700;900&display=swap">
+<style>
+/* Layout: 左に操作盤、右に計器（結果）。下に「何ができるか」の段階表とGPU価格表。受電盤の計器を思わせる落ち着いた紺と、電力を示す琥珀色。 */
+:root{
+  --bg:#f3f5f8; --panel:#ffffff; --ink:#14202e; --muted:#5a6878; --line:#d8dee6;
+  --accent:#1f5fa8; --accent-soft:#e3ecf7; --amber:#c27a00; --amber-soft:#fbefd9;
+  --seg1:#1f5fa8; --seg2:#c27a00; --seg3:#7a8796;
+  --good:#2f7d4f;
+  --f-display:"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",sans-serif;
+  --f-body:"IBM Plex Sans JP","Hiragino Sans","Yu Gothic",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0e141c; --panel:#162030; --ink:#e6ecf3; --muted:#93a1b2; --line:#2a3748;
+  --accent:#6aa6ee; --accent-soft:#1c2d45; --amber:#f0a832; --amber-soft:#3a2c12;
+  --seg1:#5a9be6; --seg2:#e8a030; --seg3:#7f8da0; --good:#5fbf86; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e141c; --panel:#162030; --ink:#e6ecf3; --muted:#93a1b2; --line:#2a3748;
+  --accent:#6aa6ee; --accent-soft:#1c2d45; --amber:#f0a832; --amber-soft:#3a2c12;
+  --seg1:#5a9be6; --seg2:#e8a030; --seg3:#7f8da0; --good:#5fbf86; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:15px;line-height:1.65}
+.wrap{max-width:1180px;margin:0 auto;padding-block:28px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:28px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;line-height:1.3}
+h1{font-size:clamp(24px,4vw,34px);font-weight:900}
+h2{font-size:21px;font-weight:700}
+h3{font-size:16px;font-weight:700}
+p{margin:0}
+.lead{color:var(--muted);max-width:68ch}
+.asof{display:inline-block;font-family:var(--f-mono);font-size:12px;color:var(--amber);background:var(--amber-soft);padding:2px 8px;border-radius:4px;margin-bottom:8px;letter-spacing:.04em}
+.num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.grid{display:grid;grid-template-columns:minmax(0,360px) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:860px){.grid{grid-template-columns:minmax(0,1fr)}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:18px;min-width:0}
+.field{display:flex;flex-direction:column;gap:6px}
+.label{font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.06em}
+.mwrow{display:flex;align-items:baseline;gap:8px}
+.mwrow input[type=number]{width:120px;font-family:var(--f-mono);font-size:26px;font-weight:600;color:var(--ink);background:transparent;border:none;border-bottom:2px solid var(--accent);padding:2px 0}
+.mwrow span{font-family:var(--f-mono);color:var(--muted)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:inherit;font-size:13px;border:1px solid var(--line);background:transparent;color:var(--ink);padding:4px 10px;border-radius:999px;cursor:pointer}
+.chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--panel)}
+select,.small-in{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%}
+.seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.seg button{font:inherit;font-size:13px;border:none;background:transparent;color:var(--ink);padding:8px 6px;cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--accent-soft);color:var(--accent);font-weight:700}
+:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.hint{font-size:12px;color:var(--muted)}
+.results{display:flex;flex-direction:column;gap:18px;min-width:0}
+.total{display:flex;flex-direction:column;gap:4px}
+.total .big{font-family:var(--f-display);font-weight:900;font-size:clamp(34px,6vw,54px);line-height:1.1}
+.total .usd{font-family:var(--f-mono);color:var(--muted);font-size:15px}
+.bar{display:flex;height:22px;border-radius:5px;overflow:hidden;background:var(--line)}
+.bar div{height:100%;transition:width .3s}
+@media (prefers-reduced-motion:reduce){.bar div{transition:none}}
+.legend{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media (max-width:560px){.legend{grid-template-columns:minmax(0,1fr)}}
+.legend .item{display:flex;flex-direction:column;gap:2px;font-size:13px}
+.legend .sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;vertical-align:baseline}
+.legend .v{font-family:var(--f-mono);font-size:16px;font-weight:600}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+@media (max-width:700px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpi{background:var(--panel);padding:12px 14px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.kpi .k{font-size:12px;color:var(--muted)}
+.kpi .v{font-family:var(--f-mono);font-size:19px;font-weight:600;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.kpi .s{font-size:12px;color:var(--muted)}
+.note{background:var(--amber-soft);border-radius:8px;padding:12px 14px;font-size:13px}
+.ladder{display:flex;flex-direction:column;gap:8px}
+.rung{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;padding:14px 16px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+@media (max-width:600px){.rung{grid-template-columns:minmax(0,1fr);gap:6px}}
+.rung.on{border-color:var(--accent);box-shadow:inset 4px 0 0 var(--accent)}
+.rung .rng{font-family:var(--f-mono);font-size:13px;color:var(--muted)}
+.rung .tag{display:inline-block;font-size:11px;font-weight:700;color:var(--panel);background:var(--accent);border-radius:3px;padding:1px 6px;margin-left:6px;vertical-align:middle}
+.rung p{font-size:14px}
+.rung .ex{font-size:13px;color:var(--muted);margin-top:4px}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;min-width:900px;font-size:13.5px}
+th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--muted);font-weight:700;background:var(--bg);white-space:nowrap}
+td.r,th.r{text-align:right}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--accent-soft)}
+tbody tr.sel{background:var(--accent-soft)}
+tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
+.gen{font-size:11px;color:var(--muted)}
+.est{font-size:11px;color:var(--amber);font-weight:700}
+.rung .ex.jp{color:var(--ink)}
+.inf-ctrl{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px}
+@media (max-width:640px){.inf-ctrl{grid-template-columns:minmax(0,1fr)}}
+.seg.seg3{grid-template-columns:repeat(3,1fr)}
+.cases{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,330px),1fr));gap:12px}
+.case{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.case dl{margin:0;display:grid;grid-template-columns:90px minmax(0,1fr);gap:4px 10px;font-size:13px}
+.case dt{color:var(--muted)}
+.case dd{margin:0}
+.case .est-box{background:var(--accent-soft);border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:2px;margin-top:auto}
+.case .est-box .v{font-size:20px;font-weight:600}
+.case .chip{align-self:flex-start}
+.refs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+@media (max-width:760px){.refs{grid-template-columns:minmax(0,1fr)}}
+.refs ul{margin:0;padding-left:18px;font-size:13px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
+.refs a{color:var(--accent)}
+.section{display:flex;flex-direction:column;gap:14px}
+.basis{display:flex;flex-direction:column;gap:8px}
+.basis .row{display:grid;grid-template-columns:200px minmax(0,1fr) 90px;gap:10px;align-items:center;font-size:13px}
+@media (max-width:600px){.basis .row{grid-template-columns:minmax(0,1fr) 80px}.basis .row .track{grid-column:1/-1;grid-row:2}}
+.track{height:12px;background:var(--bg);border-radius:3px;position:relative}
+.track i{position:absolute;top:0;bottom:0;border-radius:3px;background:var(--seg1)}
+.track i.amb{background:var(--seg2)}
+.track b{position:absolute;top:-3px;bottom:-3px;width:3px;background:var(--ink);border-radius:2px}
+.notice{font-size:13px;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:var(--panel)}
+.notice strong{color:var(--ink)}
+.site-foot{font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:14px;display:flex;flex-wrap:wrap;gap:6px 16px;justify-content:space-between}
+.site-foot a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="asof">価格基準日 2026-10-30 ／ 公開推計の中央値 ／ 同日ファクトチェック済み</div>
+    <h1>AIデータセンター建設コスト試算</h1>
+    <p class="lead">「100MWのデータセンター」と聞いたとき、建物と設備にいくら、GPUにいくらかかり、その計算力で何ができるのかを試算します。規模・立地・GPUを選ぶと、総額・必要なGPU台数・電気代・できることの目安がすぐ変わります。</p>
+  </header>
+
+  <div class="grid">
+    <!-- 操作盤 -->
+    <div class="panel" aria-label="条件">
+      <div class="field">
+        <label class="label" for="mw">規模（メガワット）</label>
+        <div class="mwrow"><input id="mw" type="number" min="1" max="10000" step="1" value="100"><span>MW</span></div>
+        <input id="mwRange" type="range" min="0" max="1000" step="1" aria-label="規模スライダー">
+        <div class="chips" id="presets"></div>
+      </div>
+      <div class="field">
+        <span class="label">そのMWは何の数字？</span>
+        <div class="seg" id="mwBasis">
+          <button type="button" data-v="it" aria-pressed="true">IT容量（サーバー用）</button>
+          <button type="button" data-v="grid" aria-pressed="false">受電容量（施設全体）</button>
+        </div>
+        <span class="hint">報道の「◯MW」は多くがIT容量。受電はそこに冷却などが上乗せされます（PUE倍）。</span>
+      </div>
+      <div class="field">
+        <label class="label" for="region">立地</label>
+        <select id="region"></select>
+      </div>
+      <div class="field">
+        <span class="label">建屋のタイプ</span>
+        <div class="seg" id="ftype">
+          <button type="button" data-v="ai" aria-pressed="true">AI向け（液冷）</button>
+          <button type="button" data-v="std" aria-pressed="false">従来型（空冷）</button>
+        </div>
+      </div>
+      <div class="field">
+        <label class="label" for="gpu">搭載するGPU</label>
+        <select id="gpu"></select>
+        <span class="hint" id="gpuHint"></span>
+      </div>
+      <div class="field">
+        <label class="label" for="fx">為替（円／ドル）</label>
+        <input id="fx" class="small-in num" type="number" min="50" max="400" step="1" value="158">
+      </div>
+    </div>
+
+    <!-- 計器 -->
+    <div class="results">
+      <div class="panel">
+        <div class="total">
+          <span class="label">総投資額（建屋・設備＋GPUサーバー＋ネットワーク）</span>
+          <span class="big num" id="totJ">—</span>
+          <span class="usd" id="totU">—</span>
+        </div>
+        <div class="bar" id="bar" role="img" aria-label="費用の内訳">
+          <div id="b1" style="background:var(--seg1)"></div>
+          <div id="b2" style="background:var(--seg2)"></div>
+          <div id="b3" style="background:var(--seg3)"></div>
+        </div>
+        <div class="legend">
+          <div class="item"><span><i class="sw" style="background:var(--seg1)"></i>建屋・電気・冷却設備</span><span class="v" id="l1">—</span><span class="hint" id="l1s"></span></div>
+          <div class="item"><span><i class="sw" style="background:var(--seg2)"></i>GPUサーバー</span><span class="v" id="l2">—</span><span class="hint" id="l2s"></span></div>
+          <div class="item"><span><i class="sw" style="background:var(--seg3)"></i>ネットワーク・ストレージ</span><span class="v" id="l3">—</span><span class="hint" id="l3s"></span></div>
+        </div>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi"><span class="k">GPUの数</span><span class="v" id="kGpu">—</span><span class="s" id="kGpuS"></span></div>
+        <div class="kpi"><span class="k">H100に換算すると</span><span class="v" id="kH100">—</span><span class="s">H100＝1とした性能目安</span></div>
+        <div class="kpi"><span class="k">1MWあたり総額</span><span class="v" id="kPerMw">—</span><span class="s">IT容量1MWあたり</span></div>
+        <div class="kpi"><span class="k">受電容量</span><span class="v" id="kGrid">—</span><span class="s" id="kGridS"></span></div>
+        <div class="kpi"><span class="k">年間の電気代</span><span class="v" id="kElec">—</span><span class="s" id="kElecS"></span></div>
+        <div class="kpi"><span class="k">一般家庭に換算</span><span class="v" id="kHome">—</span><span class="s">1世帯 平均0.45kWで計算</span></div>
+        <div class="kpi"><span class="k">90日で学習できる計算量</span><span class="v" id="kTrain">—</span><span class="s">GPT-4の学習量との比較</span></div>
+        <div class="kpi"><span class="k">年間の固定費</span><span class="v" id="kYear">—</span><span class="s">GPU5年償却＋電気代</span></div>
+      </div>
+      <p class="note" id="insight"></p>
+    </div>
+  </div>
+
+  <section class="section">
+    <h2>推論に使うと何人に届くか</h2>
+    <p class="lead">学習ではなく、チャットAIやAIエージェントとして「使ってもらう」側にGPUをすべて回した場合の目安です。動かすモデルが大きいほど、同じGPUで処理できる量は減ります。</p>
+    <div class="panel">
+      <div class="inf-ctrl">
+        <div class="field">
+          <span class="label">動かすモデルの大きさ</span>
+          <div class="seg seg3" id="model">
+            <button type="button" data-v="small" aria-pressed="false">小型（80億級）</button>
+            <button type="button" data-v="mid" aria-pressed="false">中型（700億級）</button>
+            <button type="button" data-v="frontier" aria-pressed="true">最先端（1兆級）</button>
+          </div>
+        </div>
+        <div class="field">
+          <label class="label" for="tokPrice">販売単価（100万トークンあたり・ドル）</label>
+          <input id="tokPrice" class="small-in num" type="number" min="0.01" max="100" step="0.1" value="2">
+        </div>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><span class="k">処理できる量</span><span class="v" id="iTps">—</span><span class="s">トークン／秒（稼働率60%）</span></div>
+        <div class="kpi"><span class="k">同時に会話できる人数</span><span class="v" id="iConc">—</span><span class="s">1人あたり毎秒50トークンで表示</span></div>
+        <div class="kpi"><span class="k">チャットAIの利用者</span><span class="v" id="iChat">—</span><span class="s">1人1日5万トークン</span></div>
+        <div class="kpi"><span class="k">AIエージェントの利用者</span><span class="v" id="iAgent">—</span><span class="s">1人1日100万トークン</span></div>
+        <div class="kpi"><span class="k">1か月の処理量</span><span class="v" id="iMonth">—</span><span class="s">トークン</span></div>
+        <div class="kpi"><span class="k">Google全体の処理量と比べると</span><span class="v" id="iGoogle">—</span><span class="s">月3.2千兆トークン（2026年5月発表）</span></div>
+        <div class="kpi"><span class="k">APIで売った場合の年間売上</span><span class="v" id="iRev">—</span><span class="s" id="iRevS"></span></div>
+        <div class="kpi"><span class="k">投資回収の目安</span><span class="v" id="iPay">—</span><span class="s">売上÷総投資額（電気代など除く）</span></div>
+      </div>
+      <p class="hint">1トークンは日本語でおよそ1文字。H100 1基で中型モデルを動かすと毎秒約2,500トークンを基準に、GPUの性能目安とモデルの大きさで換算しています。チャット1往復は数千トークン、コードを書くAIエージェントは1日に数十万〜数百万トークンを使います。</p>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>この規模で何ができるか</h2>
+    <p class="lead">GPUの数をH100換算にして、実例と並べました。いま選んでいる条件の位置に印が付きます。</p>
+    <div class="ladder" id="ladder"></div>
+  </section>
+
+  <section class="section">
+    <h2>日本の事例</h2>
+    <p class="lead">国内で公表されている主なAIデータセンターです。公表の投資額は土地だけ・GPU基盤だけなど範囲がまちまちなので、同じ条件（日本・AI向け液冷）でこの試算機に入れた総額を並べました。ボタンで上の試算に反映できます。</p>
+    <div class="cases" id="jpCases"></div>
+  </section>
+
+  <section class="section">
+    <h2>NVIDIA GPUの価格（2026年10月時点の推計）</h2>
+    <p class="lead">データセンター向けGPUは定価が公表されておらず、サーバーやラック単位で取引されます。下の価格は公開されている推計・販売価格の中央付近を取り、GPU1基あたりに割り戻したものです。行をクリックすると上の試算に反映されます。</p>
+    <div class="tbl">
+      <table>
+        <thead><tr>
+          <th>モデル</th><th class="r">1基あたり（サーバー込み）</th><th class="r">取引単位の価格</th><th class="r">メモリ</th><th class="r">消費電力／基</th><th class="r">性能目安</th><th>向いている用途</th>
+        </tr></thead>
+        <tbody id="gpuTable"></tbody>
+      </table>
+    </div>
+    <p class="hint">消費電力はGPU単体ではなく、CPU・スイッチ・ファンを含むシステム全体を1基あたりに割った値です。性能目安はH100＝1とした学習・推論の総合的な目安で、用途によって大きく変わります。</p>
+  </section>
+
+  <section class="section">
+    <h2>1MWあたりの建設費の相場</h2>
+    <div class="panel basis" id="basis"></div>
+  </section>
+
+  <section class="section">
+    <h2>前提と出典</h2>
+    <div class="refs">
+      <div>
+        <h3>計算の前提</h3>
+        <ul>
+          <li>建屋・設備費＝IT容量×1MWあたり単価×立地係数。土地代と送電網への接続工事は含みません。</li>
+          <li>IT容量の85%をGPUサーバーに、残り15%をネットワーク・ストレージ・管理用サーバーに使う想定です。</li>
+          <li>ネットワーク・ストレージ費はGPUサーバー費の15%としました。</li>
+          <li>PUE（施設全体の電力÷IT電力）はAI向け液冷1.2、従来型空冷1.4。</li>
+          <li>電気代は受電容量×稼働率80%×8,760時間×地域の産業用単価です。</li>
+          <li>学習量は各GPUのFP8性能×実効効率35%×90日。GPT-4の学習量は報道推計の約2.1×10²⁵ FLOPを使いました。</li>
+          <li>推論はH100 1基で中型モデル毎秒2,500トークンを基準に、小型×6、最先端×0.3、稼働率60%で計算。実際は量子化や並列化の工夫で数倍変わります。</li>
+          <li>日本の立地係数1.5は、Turner &amp; Townsend 2026-27で東京18.28ドル/W・大阪17.15ドル/Wと世界1・2位だったことから、米国平均比で置いた値です。</li>
+          <li>立地係数と電気単価は各種調査をもとにした概算です。個別案件では見積もりで必ず差が出ます。</li>
+        </ul>
+      </div>
+      <div>
+        <h3>主な出典</h3>
+        <ul>
+          <li><a href="https://www.datacentres.com/news/data-centre-construction-costs-11m-per-mw" target="_blank" rel="noopener">JLL 2026見通し：建設費 1MWあたり1,130万ドル（2020年は770万ドル）</a></li>
+          <li><a href="https://www.theenergymag.com/news/2026-05-29/core-scientific-ai-construction-cost" target="_blank" rel="noopener">Core Scientific CEO：AI向けは1MWあたり1,200万ドルに接近</a></li>
+          <li><a href="https://axis-intelligence.com/ai-data-center-cost-per-mw/" target="_blank" rel="noopener">AI向け（GPU込み）は1MWあたり3,000万〜4,500万ドル</a></li>
+          <li><a href="https://theedgemalaysia.com/node/798258" target="_blank" rel="noopener">Cushman &amp; Wakefield：マレーシアは1MWあたり960万〜1,200万ドル</a></li>
+          <li><a href="https://www.spheron.network/blog/gb300-nvl72-vs-gb200-nvl72-pricing-availability-2026/" target="_blank" rel="noopener">GB300 NVL72 ラック価格の推計</a> ／ <a href="https://www.wing.vc/content/how-much-does-an-nvidia-nvl72-cost" target="_blank" rel="noopener">NVL72の原価分析</a></li>
+          <li><a href="https://www.digitalcitizen.life/nvidias-vera-rubin-ai-rack-may-cost-7-8-million-as-memory-prices-surge/" target="_blank" rel="noopener">Vera Rubin NVL72 は1ラック最大780万ドルの報道</a></li>
+          <li><a href="https://www.amcompute.com/gpu-server-values/b300" target="_blank" rel="noopener">American Compute：HGX B300 新品 40万〜52万ドル（2026年10月）</a></li>
+          <li><a href="https://www.amcompute.com/gpu-server-values/h100" target="_blank" rel="noopener">American Compute：HGX H100 中古 約19.5万ドル</a> ／ <a href="https://cloudzero.com/blog/h100-gpu-cost/" target="_blank" rel="noopener">H100 新品 約28.5万ドル</a></li>
+          <li><a href="https://intuitionlabs.ai/articles/nvidia-ai-gpu-pricing-guide" target="_blank" rel="noopener">H200 8基ボード 約31.5万ドル</a></li>
+          <li><a href="https://www.turnerandtownsend.com/insights/data-centre-construction-cost-index-2026-27/" target="_blank" rel="noopener">Turner &amp; Townsend 2026-27：東京 18.28ドル/W、大阪 17.15ドル/W（世界1・2位）</a></li>
+          <li><a href="https://www.coreweave.com/news/coreweave-delivers-nvidia-vera-rubin-nvl72-performance-at-production-scale-starting-with-cognition" target="_blank" rel="noopener">CoreWeave：Vera Rubin NVL72 の提供開始（2026年9月30日）</a></li>
+          <li><a href="https://www.vktr.com/ai-market/nvidia-tells-microsoft-google-oracle-that-ai-server-prices-are-going-up-more-than-15/" target="_blank" rel="noopener">NVIDIA AIサーバー15%超の値上げ報道</a></li>
+          <li><a href="https://blog.google/innovation-and-ai/sundar-pichai-io-2026/" target="_blank" rel="noopener">Google I/O 2026：月3.2千兆トークンを処理</a></li>
+          <li><a href="https://monoist.itmedia.co.jp/mn/articles/2504/10/news016.html" target="_blank" rel="noopener">ABCI 3.0：H200 6,128基、事業費 約350億円</a> ／ <a href="https://atmarkit.itmedia.co.jp/ait/articles/2510/22/news093.html" target="_blank" rel="noopener">さくらインターネットのB200導入</a></li>
+          <li><a href="https://www.softbank.jp/corp/set/data/ir/documents/presentations/fy2025/investors/pdf/sbkk_investors_presentation_20260511.pdf" target="_blank" rel="noopener">ソフトバンク 投資家向け説明会資料（2026年5月11日）：堺140MW・苫小牧50MW規模・投資額</a> ／ <a href="https://k-tai.watch.impress.co.jp/docs/news/2107720.html" target="_blank" rel="noopener">110エクサFLOPS基盤は2027年度完成（ケータイWatch）</a></li>
+          <li><a href="https://epoch.ai/publications/openai-stargate-where-the-us-sites-stand" target="_blank" rel="noopener">Epoch AI：Stargate 各拠点の進捗</a></li>
+          <li><a href="https://www.softbank.jp/corp/news/press/sbkk/2025/20250314_01" target="_blank" rel="noopener">ソフトバンク：堺工場の取得（約150MW→250MW超）</a> ／ <a href="https://www.softbank.jp/business/service/platform/datacenter/tomakomai" target="_blank" rel="noopener">苫小牧AIデータセンター</a> ／ <a href="https://www.nikkan.co.jp/articles/view/00691760" target="_blank" rel="noopener">苫小牧 総事業費650億円超</a></li>
+          <li><a href="https://businessnetwork.jp/article/32667/" target="_blank" rel="noopener">KDDI 大阪堺データセンター稼働</a> ／ <a href="https://toyokeizai.net/articles/-/931689" target="_blank" rel="noopener">受電最大50MW（東洋経済）</a></li>
+          <li><a href="https://www.businessinsider.jp/article/297882/" target="_blank" rel="noopener">さくらインターネット 石狩のGPU整備計画</a></li>
+          <li><a href="https://www.tomshardware.com/pc-components/gpus/nvidia-raises-rtx-pro-6000-blackwell-gpu-pricing-to-usd13-250-55-percent-increase-over-msrp-in-a-years-time" target="_blank" rel="noopener">RTX PRO 6000 Blackwell 13,250ドルへ値上げ</a> ／ <a href="https://letsdatascience.com/news/nvidia-raises-rtx-pro-6000-blackwell-price-again-6d1ae9ff" target="_blank" rel="noopener">さらに16,000ドルへ</a></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <p class="notice"><strong>ご利用にあたって</strong>　本ツールは、公開されている推計値・報道・企業資料をもとにした概算です。実際の費用は、土地・電力契約・調達条件・為替などで大きく変わります。投資判断や見積りの代わりにはなりません。数値は価格基準日（2026年10月30日）時点のもので、その後の価格改定は反映されていません。</p>
+
+  <footer class="site-foot">
+    <span>作成：<a href="https://questvision.co.jp/" target="_blank" rel="noopener">株式会社Quest Vision</a></span>
+    <span>最終更新 2026-10-30</span>
+  </footer>
+</div>
+
+<script>
+// GPU：price＝1基あたりのサーバー込み価格(USD)、unit＝取引単位の価格表記、kw＝システム全体の1基あたり電力、fp8＝密行列FP8性能(PFLOPS)、rel＝H100＝1の総合目安
+const GPUS = [
+  {id:"rubin", name:"Vera Rubin NVL72", gen:"Rubin ／ 2026年9月〜出荷開始", price:97000, unitTxt:"1ラック(72基) 約700万ドル", unitRange:"500万〜900万ドル", mem:"288GB HBM4", kw:2.8, fp8:16, rel:10, est:true, use:"次世代フロンティアモデルの学習と大規模推論。CoreWeaveが9月末に提供開始。HBM4の高騰で値上がり傾向"},
+  {id:"gb300", name:"GB300 NVL72", gen:"Blackwell Ultra ／ 2025年後半〜", price:62500, unitTxt:"1ラック(72基) 約450万ドル", unitRange:"400万〜650万ドル（設置・ネットワーク込みは800万ドル超）", mem:"288GB HBM3e", kw:1.95, fp8:5, rel:3.6, est:false, use:"いまの主力。ギガワット級AI工場、フロンティアモデルの学習・推論。2027年納品分は15〜17%値上げとの報道"},
+  {id:"gb200", name:"GB200 NVL72", gen:"Blackwell ／ 2025年〜", price:47000, unitTxt:"1ラック(72基) 約340万ドル", unitRange:"300万〜390万ドル", mem:"186GB HBM3e", kw:1.8, fp8:5, rel:3, est:true, use:"GB300の前世代ラック。国内ではKDDI堺などが導入"},
+  {id:"b300", name:"HGX B300", gen:"Blackwell Ultra ／ 2025年後半〜", price:53000, unitTxt:"8基サーバー 約42.5万ドル", unitRange:"大口40万〜45万、1台なら49万〜52万ドル", mem:"288GB HBM3e", kw:1.8, fp8:4.5, rel:3.2, est:false, use:"空冷でも組める8基サーバー。企業・クラウドの学習と推論"},
+  {id:"b200", name:"HGX B200", gen:"Blackwell ／ 2025年〜", price:47500, unitTxt:"8基サーバー 約38万ドル", unitRange:"30万〜40万ドル", mem:"180GB HBM3e", kw:1.8, fp8:4.5, rel:2.5, est:true, use:"Blackwell初代。B300への移行で値下がり中"},
+  {id:"h200", name:"HGX H200", gen:"Hopper ／ 2024年〜", price:39000, unitTxt:"8基サーバー 約31.5万ドル", unitRange:"28万〜33万ドル", mem:"141GB HBM3e", kw:1.28, fp8:1.98, rel:1.4, est:false, use:"H100のメモリ増強版。推論用として根強い需要"},
+  {id:"h100", name:"HGX H100", gen:"Hopper ／ 2022年〜", price:35600, unitTxt:"8基サーバー 新品 約28.5万ドル", unitRange:"中古 約19.5万ドル", mem:"80GB HBM3", kw:1.28, fp8:1.98, rel:1, est:false, use:"生成AIブームの立役者。いまは中古・クラウドで安く使える基準機"},
+  {id:"rtx", name:"RTX PRO 6000 Blackwell", gen:"Blackwell ／ 2025年〜", price:21000, unitTxt:"カード単体 約1.6万ドル", unitRange:"NVIDIA直販価格。発売時は8,565ドル", mem:"96GB GDDR7", kw:0.7, fp8:1.0, rel:0.6, est:true, use:"空冷の普通のサーバーに入る。社内AI・画像生成・小規模推論"},
+];
+// 立地：f＝建設費係数（米国平均＝1）、e＝産業用電気単価(USD/kWh)
+const REGIONS = [
+  {id:"us", name:"米国（平均）", f:1.00, e:0.09},
+  {id:"jp", name:"日本（東京・大阪）", f:1.50, e:0.15},
+  {id:"sg", name:"シンガポール", f:1.30, e:0.20},
+  {id:"eu", name:"欧州（独・英など）", f:1.15, e:0.18},
+  {id:"my", name:"マレーシア（ジョホール）", f:0.85, e:0.10},
+  {id:"in", name:"インド", f:0.65, e:0.09},
+];
+// 建屋：perMw＝米国でのIT容量1MWあたり建設費(USD百万)、pue
+const FTYPES = {ai:{name:"AI向け（液冷）", perMw:16, pue:1.2}, std:{name:"従来型（空冷）", perMw:11.3, pue:1.4}};
+const PRESETS = [10,50,100,300,1000,5000];
+const COMPUTE_SHARE = 0.85, NET_RATE = 0.15, LOAD = 0.8, MFU = 0.35, HOME_KW = 0.45, GPT4_FLOP = 2.1e25;
+const TIERS = [
+  {min:0, max:1e3, title:"社内AI・研究室", desc:"自社データでの微調整、社内向けチャットや文書検索、数千人規模への推論サービス。ゼロからの大規模言語モデル学習はまだ厳しい規模です。", ex:"例：大学研究室、企業の社内GPUクラスター（1MW前後）", jp:"国内：大学・企業の研究用GPUサーバー群"},
+  {min:1e3, max:1e4, title:"国の研究拠点・AIスタートアップ", desc:"数百億パラメータ級のモデルをゼロから学習できます。国産LLMの開発や、業界特化モデルの提供が現実的になります。", ex:"例：国の研究用スーパーコンピューター、国産LLMを開発するスタートアップ", jp:"国内：産総研 ABCI 3.0（H200 6,128基）、さくらインターネット 石狩（H100・H200・B200 約5,000基超）"},
+  {min:1e4, max:1e5, title:"フロンティアモデルの学習", desc:"GPT-4級のモデルを数か月で学習できます。数百万〜数千万人規模のAIサービスも支えられます。", ex:"例：Meta Llama 3.1 405B（H100 1.6万基で学習）、xAI Colossus 初期（H100 10万基、約150MW）", jp:"国内：KDDI 大阪堺（最大50MW、GB200 NVL72）、ソフトバンク 苫小牧（当初約50MW）"},
+  {min:1e5, max:1e6, title:"ギガワット級AI工場", desc:"次世代フロンティアモデルを学習しながら、世界規模の推論を同時にこなす規模。原子力発電所1基分前後の電力を使います。", ex:"例：OpenAI Stargate テキサス州アビリーン（約1.2GW、2026年末完成目標。2GWへの拡張は中止）、xAI Colossus 2", jp:"国内：ソフトバンク 堺（140MW→将来250MW超）、ソフトバンク 苫小牧の将来計画（300MW超）"},
+  {min:1e6, max:Infinity, title:"国家プロジェクト級", desc:"一企業の枠を超え、電力網や発電所の新設とセットで進む規模。投資額は数十兆円に達します。", ex:"例：Meta Hyperion（最大5GW計画）、Stargate 全体（10GW計画）", jp:"国内：この規模の計画はまだ公表されていません"},
+];
+// 日本の事例：mw＝受電容量ベースで試算に入れる値。公表値は各社発表・報道ベース
+const JP_CASES = [
+  {name:"ソフトバンク 堺AIデータセンター", place:"大阪府堺市（旧シャープ堺工場）", scale:"受電 140MW（110エクサFLOPSのAI計算基盤に必要な容量）→ 将来250MW超", gpu:"非公表", money:"土地・建物の取得 約1,000億円。北海道と堺のAIデータセンター投資の公表額は計1,350億円（補助金控除後）", when:"当初は2026年中の稼働目標。2026年5月の中期計画には稼働時期の明記なし（110エクサFLOPS基盤は2027年度完成と報道）", mw:140, g:"gb300"},
+  {name:"ソフトバンク 苫小牧AIデータセンター", place:"北海道苫小牧市", scale:"データホール棟 最大50MW規模 → 将来300MW超", gpu:"非公表", money:"総事業費650億円超（国の補助 最大300億円、2023年発表時点）", when:"2026年度の開業予定（10月時点で開業発表なし）", mw:50, g:"gb300"},
+  {name:"KDDI 大阪堺データセンター", place:"大阪府堺市（旧シャープ堺工場）", scale:"受電 最大50MW（報道）", gpu:"GB200 NVL72 など、直接液冷", money:"非公表", when:"2026年1月 稼働", mw:50, g:"gb200"},
+  {name:"産総研 ABCI 3.0", place:"千葉県柏市", scale:"H200 6,128基（電力はGPU数から逆算 約11MW）", gpu:"H200（8基×766台）", money:"事業費 約350億円（初期費用と初年度保守、既存の建屋を利用）", when:"2025年1月 一般提供開始", mw:11, g:"h200"},
+  {name:"さくらインターネット 石狩データセンター", place:"北海道石狩市", scale:"H100・H200・B200 合計 約5,000基超 → 2027年度末までにさらに拡大", gpu:"H100、H200、B200", money:"GPU基盤に2027年度末までで約1,000億円（国の助成あり）", when:"2024年〜順次稼働", mw:10, g:"h200"},
+];
+
+const $ = id => document.getElementById(id);
+const state = {mw:100, basis:"it", region:"us", ftype:"ai", gpu:"gb300", fx:158, model:"frontier", tokPrice:2};
+// 推論：H100 1基が中型(700億級)モデルで出せるトークン/秒、モデル規模による倍率
+const H100_TPS = 2500, INF_LOAD = 0.6, STREAM_TPS = 50, CHAT_TOK = 5e4, AGENT_TOK = 1e6, GOOGLE_MONTH = 3.2e15;
+const MODEL_F = {small:6, mid:1, frontier:0.3};
+
+function fmtJ(usd){
+  const y = usd*state.fx;
+  if (y >= 1e12) return (y/1e12).toFixed(y>=1e13?1:2)+"兆円";
+  if (y >= 1e8) return Math.round(y/1e8).toLocaleString()+"億円";
+  return Math.round(y/1e4).toLocaleString()+"万円";
+}
+function fmtU(usd){
+  if (usd >= 1e9) return "$"+(usd/1e9).toFixed(usd>=1e10?1:2)+"B";
+  if (usd >= 1e6) return "$"+(usd/1e6).toFixed(1)+"M";
+  return "$"+Math.round(usd/1e3).toLocaleString()+"K";
+}
+function fmtN(n){
+  if (n >= 1e8) return (n/1e8).toFixed(2)+"億";
+  if (n >= 1e4) return (n/1e4).toFixed(n>=1e6?0:1)+"万";
+  return Math.round(n).toLocaleString();
+}
+function fmtBig(n){
+  if (n >= 1e16) return (n/1e16).toFixed(1)+"京";
+  if (n >= 1e12) return (n/1e12).toFixed(n>=1e14?0:1)+"兆";
+  if (n >= 1e8) return (n/1e8).toFixed(0)+"億";
+  return fmtN(n);
+}
+function fmtMW(mw){ return mw>=1000 ? (mw/1000).toFixed(2)+" GW" : (mw<10?mw.toFixed(1):Math.round(mw))+" MW"; }
+
+// 対数スライダー 1〜10,000MW
+const toSlider = mw => Math.round(Math.log10(Math.max(1,mw))/4*1000);
+const fromSlider = v => { const mw = Math.pow(10, v/1000*4); return mw<10?Math.round(mw*10)/10:mw<100?Math.round(mw):Math.round(mw/5)*5; };
+
+function calc(s=state){
+  const g = GPUS.find(x=>x.id===s.gpu), r = REGIONS.find(x=>x.id===s.region), f = FTYPES[s.ftype];
+  const itMW = s.basis==="it" ? s.mw : s.mw/f.pue;
+  const gridMW = itMW*f.pue;
+  const facility = itMW*f.perMw*r.f*1e6;
+  const count = Math.floor(itMW*1000*COMPUTE_SHARE/g.kw);
+  const gpuCost = count*g.price;
+  const net = gpuCost*NET_RATE;
+  const total = facility+gpuCost+net;
+  const elec = gridMW*1000*8760*LOAD*r.e;
+  const h100 = count*g.rel;
+  const flop = count*g.fp8*1e15*MFU*90*86400;
+  return {g,r,f,itMW,gridMW,facility,count,gpuCost,net,total,elec,h100,flop,yearly:gpuCost/5+elec};
+}
+
+function render(){
+  const c = calc();
+  $("totJ").textContent = "約"+fmtJ(c.total);
+  $("totU").textContent = fmtU(c.total)+"（1ドル＝"+state.fx+"円）";
+  [["b1",c.facility],["b2",c.gpuCost],["b3",c.net]].forEach(([id,v])=>$(id).style.width=(v/c.total*100)+"%");
+  $("l1").textContent = fmtJ(c.facility); $("l1s").textContent = fmtU(c.facility)+" ・ "+Math.round(c.facility/c.total*100)+"%";
+  $("l2").textContent = fmtJ(c.gpuCost); $("l2s").textContent = fmtU(c.gpuCost)+" ・ "+Math.round(c.gpuCost/c.total*100)+"%";
+  $("l3").textContent = fmtJ(c.net); $("l3s").textContent = fmtU(c.net)+" ・ "+Math.round(c.net/c.total*100)+"%";
+  $("kGpu").textContent = fmtN(c.count)+"基";
+  $("kGpuS").textContent = c.g.name+(c.g.id==="gb300"||c.g.id==="rubin" ? "（"+fmtN(Math.ceil(c.count/72))+"ラック）" : "（"+fmtN(Math.ceil(c.count/8))+"台）");
+  $("kH100").textContent = fmtN(c.h100)+"基分";
+  $("kPerMw").textContent = fmtJ(c.total/c.itMW);
+  $("kGrid").textContent = fmtMW(c.gridMW);
+  $("kGridS").textContent = "IT "+fmtMW(c.itMW)+" × PUE "+c.f.pue;
+  $("kElec").textContent = fmtJ(c.elec);
+  $("kElecS").textContent = c.r.name+" "+Math.round(c.r.e*state.fx)+"円/kWh";
+  $("kHome").textContent = fmtN(c.gridMW*1000/HOME_KW)+"世帯";
+  const ratio = c.flop/GPT4_FLOP;
+  $("kTrain").textContent = ratio>=1 ? "GPT-4の"+(ratio>=10?Math.round(ratio):ratio.toFixed(1))+"倍" : "GPT-4の"+(ratio*100).toFixed(ratio<0.1?1:0)+"%";
+  $("kYear").textContent = fmtJ(c.yearly);
+  const share = Math.round((c.gpuCost+c.net)/c.total*100);
+  $("insight").innerHTML = `<b>${fmtMW(state.mw)}</b>（${state.basis==="it"?"IT容量":"受電容量"}）を${c.r.name}に${c.f.name}で建て、${c.g.name}を載せると総額は<b>約${fmtJ(c.total)}</b>。そのうち<b>${share}%</b>がGPUとネットワークで、建物よりも中身のほうが高くつきます。GPUは5年ほどで世代交代するため、建物を使い続けながら中身を入れ替えていくのが一般的です。`;
+  // 推論
+  const tps = c.h100*H100_TPS*MODEL_F[state.model]*INF_LOAD;
+  const perDay = tps*86400, rev = perDay*365/1e6*state.tokPrice;
+  $("iTps").textContent = fmtN(tps);
+  $("iConc").textContent = fmtN(tps/STREAM_TPS)+"人";
+  $("iChat").textContent = fmtN(perDay/CHAT_TOK)+"人";
+  $("iAgent").textContent = fmtN(perDay/AGENT_TOK)+"人";
+  $("iMonth").textContent = fmtBig(perDay*30);
+  const gr = perDay*30/GOOGLE_MONTH;
+  $("iGoogle").textContent = gr>=1 ? gr.toFixed(1)+"倍" : (gr*100).toFixed(gr<0.01?2:1)+"%";
+  $("iRev").textContent = fmtJ(rev);
+  $("iRevS").textContent = fmtU(rev)+"（100万トークン $"+state.tokPrice+"）";
+  $("iPay").textContent = (c.total/rev).toFixed(1)+"年";
+  // 段階表
+  $("ladder").innerHTML = TIERS.map(t=>{
+    const on = c.h100>=t.min && c.h100<t.max;
+    const rng = t.max===Infinity ? "H100換算 "+fmtN(t.min)+"基〜" : "H100換算 "+(t.min?fmtN(t.min):"0")+"〜"+fmtN(t.max)+"基";
+    return `<div class="rung${on?" on":""}"><div class="rng">${rng}</div><div><h3>${t.title}${on?'<span class="tag">いまの条件</span>':""}</h3><p>${t.desc}</p><p class="ex">${t.ex}</p><p class="ex jp">${t.jp}</p></div></div>`;
+  }).join("");
+  // 日本の事例
+  $("jpCases").innerHTML = JP_CASES.map((k,i)=>{
+    const cfg = {...state, mw:k.mw, basis:"grid", region:"jp", ftype:"ai", gpu:k.g};
+    const e = calc(cfg), gname = GPUS.find(x=>x.id===k.g).name;
+    return `<div class="case"><div><h3>${k.name}</h3><p class="gen">${k.place} ・ ${k.when}</p></div>
+      <dl><dt>規模</dt><dd>${k.scale}</dd><dt>GPU</dt><dd>${k.gpu}</dd><dt>公表の投資額</dt><dd>${k.money}</dd></dl>
+      <div class="est-box"><span class="gen">この試算機で計算すると（受電${fmtMW(k.mw)}・${gname}）</span><span class="num v">約${fmtJ(e.total)}</span><span class="gen">GPU ${fmtN(e.count)}基 ・ H100換算 ${fmtN(e.h100)}基</span></div>
+      <button type="button" class="chip" data-case="${i}">この条件で試算する</button></div>`;
+  }).join("");
+  // GPU表
+  $("gpuTable").innerHTML = GPUS.map(g=>`<tr data-id="${g.id}" class="${g.id===state.gpu?"sel":""}" tabindex="0">
+    <td><b>${g.name}</b>${g.est?' <span class="est">推計幅大</span>':""}<div class="gen">${g.gen}</div></td>
+    <td class="r num">$${g.price.toLocaleString()}<div class="gen">約${Math.round(g.price*state.fx/1e4).toLocaleString()}万円</div></td>
+    <td class="r">${g.unitTxt}<div class="gen">${g.unitRange}</div></td>
+    <td class="r num">${g.mem}</td>
+    <td class="r num">${g.kw} kW</td>
+    <td class="r num">${g.rel}</td>
+    <td>${g.use}</td></tr>`).join("");
+  $("gpuHint").textContent = c.g.unitTxt+"（1基あたり約"+Math.round(c.g.price*state.fx/1e4).toLocaleString()+"万円）";
+  // 相場
+  const mine = c.total/c.itMW/1e6;
+  const rows = [
+    ["従来型の建設費（JLL 2026）", 11.3, 11.3, false],
+    ["AI向けの建屋・設備", 15, 25, false],
+    ["AI向け 総額（GPU込み）", 30, 45, true],
+  ];
+  const maxV = Math.max(60, mine*1.1);
+  $("basis").innerHTML = rows.map(([n,a,b,amb])=>`<div class="row"><span>${n}</span><div class="track"><i class="${amb?"amb":""}" style="left:${a/maxV*100}%;width:${Math.max(1,(b-a)/maxV*100)}%"></i></div><span class="num">${a===b?"$"+a+"M":"$"+a+"〜"+b+"M"}</span></div>`).join("")
+   + `<div class="row"><span><b>いまの試算</b></span><div class="track"><b style="left:calc(${Math.min(mine/maxV*100,100)}% - 1px)"></b></div><span class="num"><b>$${mine.toFixed(1)}M</b></span></div>`
+   + `<p class="hint">単位はIT容量1MWあたりの百万ドル。2020年の770万ドルから2026年は1,130万ドルへ、6年で約47%上昇しています。</p>`;
+  // 操作盤の表示同期
+  $("mw").value = state.mw; $("mwRange").value = toSlider(state.mw);
+  document.querySelectorAll("#presets .chip").forEach(b=>b.setAttribute("aria-pressed", +b.dataset.v===state.mw));
+  $("gpu").value = state.gpu;
+}
+
+// 初期化
+$("region").innerHTML = REGIONS.map(r=>`<option value="${r.id}">${r.name}</option>`).join("");
+$("gpu").innerHTML = GPUS.map(g=>`<option value="${g.id}">${g.name}（${g.gen.split(" ／ ")[0]}）</option>`).join("");
+$("presets").innerHTML = PRESETS.map(v=>`<button type="button" class="chip" data-v="${v}">${v>=1000?v/1000+"GW":v+"MW"}</button>`).join("");
+$("presets").addEventListener("click", e=>{ const b=e.target.closest(".chip"); if(b){state.mw=+b.dataset.v; render();} });
+$("mw").addEventListener("input", e=>{ const v=+e.target.value; if(v>0){state.mw=Math.min(v,10000); render();} });
+$("mwRange").addEventListener("input", e=>{ state.mw=fromSlider(+e.target.value); render(); });
+$("region").addEventListener("change", e=>{ state.region=e.target.value; render(); });
+$("gpu").addEventListener("change", e=>{ state.gpu=e.target.value; render(); });
+$("fx").addEventListener("input", e=>{ const v=+e.target.value; if(v>0){state.fx=v; render();} });
+function bindSeg(id,key){ $(id).addEventListener("click", e=>{ const b=e.target.closest("button"); if(!b) return; state[key]=b.dataset.v; $(id).querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed", x===b)); render(); }); }
+bindSeg("mwBasis","basis"); bindSeg("ftype","ftype"); bindSeg("model","model");
+$("tokPrice").addEventListener("input", e=>{ const v=+e.target.value; if(v>0){state.tokPrice=v; render();} });
+function pickRow(e){ const tr=e.target.closest("tr[data-id]"); if(tr){ state.gpu=tr.dataset.id; render(); window.scrollTo({top:0,behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"}); } }
+$("jpCases").addEventListener("click", e=>{
+  const b=e.target.closest("[data-case]"); if(!b) return;
+  const k=JP_CASES[+b.dataset.case];
+  Object.assign(state,{mw:k.mw, basis:"grid", region:"jp", ftype:"ai", gpu:k.g});
+  $("region").value="jp";
+  [["mwBasis","grid"],["ftype","ai"]].forEach(([id,v])=>$(id).querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed", x.dataset.v===v)));
+  render(); window.scrollTo({top:0,behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"});
+});
+$("gpuTable").addEventListener("click", pickRow);
+$("gpuTable").addEventListener("keydown", e=>{ if(e.key==="Enter") pickRow(e); });
+render();
+</script>
+</body>
+</html>
